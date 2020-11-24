@@ -129,7 +129,7 @@ class PSForm_d0abx<bits<10> xo, dag OOL, dag IOL, string asmstr, InstrItinClass 
 }
 
 def HasPaired : Predicate<"PPCSubTarget.hasPaired()">;
-let Predicates = [HasPaired] in {
+let Predicates = [HasPaired], hasNoSchedulingInfo = 1 in {
 
 def PSQ_LX     : PSQForm_d<6,  (outs f4rc:$frD), (ins gprc:$rA, gprc:$rB, u1imm:$W, u3imm:$I), "psq_lx $frD, $rA, $rB, $W, $I", NoItinerary>;
 def PSQ_LUX    : PSQForm_d<38, (outs f4rc:$frD), (ins gprc:$rA, gprc:$rB, u1imm:$W, u3imm:$I), "psq_lux $frD, $rA, $rB, $W, $I", NoItinerary>;
