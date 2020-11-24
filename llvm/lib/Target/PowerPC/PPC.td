@@ -67,8 +67,7 @@ def FeatureFPU       : SubtargetFeature<"fpu","HasFPU","true",
                                         "Enable classic FPU instructions",
                                         [FeatureHardFloat]>;
 def FeaturePaired    : SubtargetFeature<"paired", "HasPaired", "true",
-					"Enable Paired Single instructions",
-					[FeaturePaired]>;
+                                        "Enable Paired Single instructions">;
 def FeatureAltivec   : SubtargetFeature<"altivec","HasAltivec", "true",
                                         "Enable Altivec instructions",
                                         [FeatureFPU]>;
