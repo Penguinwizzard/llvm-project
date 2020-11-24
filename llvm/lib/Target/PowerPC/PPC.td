@@ -66,6 +66,9 @@ def FeatureCRBits    : SubtargetFeature<"crbits", "UseCRBits", "true",
 def FeatureFPU       : SubtargetFeature<"fpu","HasFPU","true",
                                         "Enable classic FPU instructions",
                                         [FeatureHardFloat]>;
+def FeaturePaired    : SubtargetFeature<"paired", "HasPaired", "true",
+					"Enable Paired Single instructions",
+					[FeaturePaired]>;
 def FeatureAltivec   : SubtargetFeature<"altivec","HasAltivec", "true",
                                         "Enable Altivec instructions",
                                         [FeatureFPU]>;
@@ -478,6 +481,9 @@ def : Processor<"620", G3Itineraries, [Directive620,
 def : Processor<"750", G4Itineraries, [Directive750,
                                        FeatureFRES, FeatureFRSQRTE,
                                        FeatureMFTB]>;
+def : Processor<"750cl", G4Itineraries, [Directive750,
+                                         FeatureFRES, FeatureFRSQRTE,
+                                         FeatureSTFIWX, FeaturePaired]>;
 def : Processor<"g3", G3Itineraries, [Directive750,
                                       FeatureFRES, FeatureFRSQRTE,
                                       FeatureMFTB]>;
