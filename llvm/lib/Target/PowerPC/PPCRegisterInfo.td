@@ -58,6 +58,10 @@ class FPR<bits<5> num, string n> : PPCReg<n> {
   let HWEncoding{4-0} = num;
 }
 
+// PSF - One of the 32 2x32-bit paired single floating-point registers
+class PSF<bits<5> num, string n> : PPCReg<n> {
+  let HWEncoding{4-0} = num;
+}
 // VF - One of the 32 64-bit floating-point subregisters of the vector
 // registers (used by VSX).
 class VF<bits<5> num, string n> : PPCReg<n> {
@@ -140,6 +144,11 @@ foreach Index = 0-31 in {
 foreach Index = 0-31 in {
   def F#Index : FPR<Index, "f"#Index>,
                 DwarfRegNum<[!add(Index, 32), !add(Index, 32)]>;
+}
+
+// Paired Single floating-point registers
+foreach Index = 0-31 in {
+  def PSF#Index : PSF<Index, "f"#Index>;
 }
 
 // 64-bit Floating-point subregisters of Altivec registers
@@ -339,6 +348,9 @@ def SPERC : RegisterClass<"PPC", [f64], 64, (add (sequence "S%u", 2, 12),
 def F8RC : RegisterClass<"PPC", [f64], 64, (add (sequence "F%u", 0, 13),
                                                 (sequence "F%u", 31, 14))>;
 def F4RC : RegisterClass<"PPC", [f32], 32, (add F8RC)>;
+
+def PSRC : RegisterClass<"PPC", [v2f32], 64, (add (sequence "PSF%u", 0, 13),
+                                                  (sequence "PSF%u", 31, 14))>;
 
 def VRRC : RegisterClass<"PPC",
                          [v16i8,v8i16,v4i32,v2i64,v1i128,v4f32,v2f64, f128],

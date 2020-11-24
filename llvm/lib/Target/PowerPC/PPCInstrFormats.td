@@ -2111,6 +2111,128 @@ class Z23Form_8<bits<6> opcode, bits<8> xo, dag OOL, dag IOL, string asmstr,
   let Inst{31}    = RC;
 }
 
+// Paired-Single instruction formats
+class PSForm_xdab<bits<10> xo, dag OOL, dag IOL, string asmstr,
+                        InstrItinClass itin, list<dag> pattern>
+       : I<4, OOL, IOL, asmstr, itin> {
+  bits<5> D;
+  bits<5> A;
+  bits<5> B;
+
+  let Pattern = pattern;
+
+  bit RC = 0;
+
+  let Inst{6-10} = D;
+  let Inst{11-15} = A;
+  let Inst{16-20} = B;
+  let Inst{21-30} = xo;
+  let Inst{31} = RC;
+}
+
+class PSForm_adabc<bits<5> xo, dag OOL, dag IOL, string asmstr,
+                        InstrItinClass itin, list<dag> pattern>
+       : I<4, OOL, IOL, asmstr, itin> {
+  bits<5> D;
+  bits<5> A;
+  bits<5> B;
+  bits<5> C;
+
+  let Pattern = pattern;
+
+  bit RC = 0;
+
+  let Inst{6-10} = D;
+  let Inst{11-15} = A;
+  let Inst{16-20} = B;
+  let Inst{21-25} = C;
+  let Inst{26-30} = xo;
+  let Inst{31} = RC;
+}
+
+class PSQForm_xw<bits<6> op, dag OOL, dag IOL, string asmstr,
+                 InstrItinClass itin, list<dag> pattern>
+  : I<4, OOL, IOL, asmstr, itin> {
+  bits<5> D;
+  bits<5> A;
+  bits<5> B;
+  bit W;
+  bits<3> I;
+
+  let Pattern = pattern;
+
+  let Inst{6-10} = D;
+  let Inst{11-15} = A;
+  let Inst{16-20} = B;
+  let Inst{21} = W;
+  let Inst{22-24} = I;
+  let Inst{25-30} = op;
+  let Inst{31} = 0; // no record mode supported
+}
+
+class PSQForm_dw<bits<6> op, dag OOL, dag IOL, string asmstr,
+                InstrItinClass itin, list<dag> pattern>
+    :I<op, OOL, IOL, asmstr, itin> {
+  bits<5> D;
+  bit W;
+  bits<3> I;
+  bits<12> d;
+  bits<5> A;
+
+  let Pattern = pattern;
+
+  let Inst{6-10} = D;
+  let Inst{11-15} = A;
+  let Inst{16} = W;
+  let Inst{17-19} = I;
+  let Inst{20-31} = d;
+}
+
+class PSForm_xcrab<bit ordered, bit high, dag OOL, dag IOL, string asmstr,
+                   InstrItinClass itin, list<dag> pattern>
+  : I<4, OOL, IOL, asmstr, itin> {
+  bits<3> D;
+  bits<5> A;
+  bits<5> B;
+
+  let Inst{6-8} = D;
+  let Inst{9-10} = 0;
+  let Inst{11-15} = A;
+  let Inst{16-20} = B;
+  let Inst{21-23} = 0;
+  let Inst{24} = high;
+  let Inst{25} = ordered;
+  let Inst{26-31} = 0;
+}
+
+class PSForm_x0ab<bits<10> xo, dag OOL, dag IOL, string asmstr,
+                        InstrItinClass itin, list<dag> pattern>
+  : PSForm_xdab<xo, OOL, IOL, asmstr, itin, pattern> {
+  let D = 0;
+}
+
+class PSForm_xd0b<bits<10> xo, dag OOL, dag IOL, string asmstr,
+                        InstrItinClass itin, list<dag> pattern>
+  : PSForm_xdab<xo, OOL, IOL, asmstr, itin, pattern> {
+  let A = 0;
+}
+
+class PSForm_adab0<bits<5> xo, dag OOL, dag IOL, string asmstr,
+                   InstrItinClass itin, list<dag> pattern>
+  : PSForm_adabc<xo, OOL, IOL, asmstr, itin, pattern> {
+  let C = 0;
+}
+class PSForm_ada0c<bits<5> xo, dag OOL, dag IOL, string asmstr,
+                   InstrItinClass itin, list<dag> pattern>
+  : PSForm_adabc<xo, OOL, IOL, asmstr, itin, pattern> {
+  let B = 0;
+}
+class PSForm_ad0b0<bits<5> xo, dag OOL, dag IOL, string asmstr,
+                   InstrItinClass itin, list<dag> pattern>
+  : PSForm_adab0<xo, OOL, IOL, asmstr, itin, pattern> {
+  let A = 0;
+}
+
 //===----------------------------------------------------------------------===//
 // EmitTimePseudo won't have encoding information for the [MC]CodeEmitter
 // stuff

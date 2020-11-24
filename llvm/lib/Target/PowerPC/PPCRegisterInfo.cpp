@@ -190,6 +190,8 @@ PPCRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
     // 32-bit targets.
     if (Subtarget.hasAltivec())
       return CSR_SVR32_ColdCC_Altivec_SaveList;
+    else if (Subtarget.hasPaired())
+      return CSR_SVR32_ColdCC_Paired_SaveList;
     else if (Subtarget.hasSPE())
       return CSR_SVR32_ColdCC_SPE_SaveList;
     return CSR_SVR32_ColdCC_SaveList;
@@ -206,6 +208,8 @@ PPCRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
     return CSR_AIX32_SaveList;
   if (Subtarget.hasAltivec())
     return CSR_SVR432_Altivec_SaveList;
+  if (Subtarget.hasPaired())
+    return CSR_SVR432_Paired_SaveList;
   else if (Subtarget.hasSPE())
     return CSR_SVR432_SPE_SaveList;
   return CSR_SVR432_SaveList;
@@ -229,20 +233,27 @@ PPCRegisterInfo::getCallPreservedMask(const MachineFunction &MF,
   }
 
   if (CC == CallingConv::Cold) {
-    return TM.isPPC64() ? (Subtarget.hasAltivec() ? CSR_SVR64_ColdCC_Altivec_RegMask
-                                                  : CSR_SVR64_ColdCC_RegMask)
-                        : (Subtarget.hasAltivec() ? CSR_SVR32_ColdCC_Altivec_RegMask
-                                                  : (Subtarget.hasSPE()
-                                                  ? CSR_SVR32_ColdCC_SPE_RegMask
-                                                  : CSR_SVR32_ColdCC_RegMask));
+    return TM.isPPC64()
+               ? (Subtarget.hasAltivec() ? CSR_SVR64_ColdCC_Altivec_RegMask
+                                         : CSR_SVR64_ColdCC_RegMask)
+               : (Subtarget.hasAltivec()
+                      ? CSR_SVR32_ColdCC_Altivec_RegMask
+                      : (Subtarget.hasPaired()
+                             ? CSR_SVR32_ColdCC_Paired_RegMask
+                             : (Subtarget.hasSPE()
+                                    ? CSR_SVR32_ColdCC_SPE_RegMask
+                                    : CSR_SVR32_ColdCC_RegMask)));
   }
 
-  return TM.isPPC64() ? (Subtarget.hasAltivec() ? CSR_PPC64_Altivec_RegMask
-                                                : CSR_PPC64_RegMask)
-                      : (Subtarget.hasAltivec()
-                             ? CSR_SVR432_Altivec_RegMask
-                             : (Subtarget.hasSPE() ? CSR_SVR432_SPE_RegMask
-                                                   : CSR_SVR432_RegMask));
+  return TM.isPPC64()
+             ? (Subtarget.hasAltivec() ? CSR_PPC64_Altivec_RegMask
+                                       : CSR_PPC64_RegMask)
+             : (Subtarget.hasAltivec()
+                    ? CSR_SVR432_Altivec_RegMask
+                    : (Subtarget.hasPaired()
+                           ? CSR_SVR432_Paired_RegMask
+                           : (Subtarget.hasSPE() ? CSR_SVR432_SPE_RegMask
+                                                 : CSR_SVR432_RegMask)));
 }
 
 const uint32_t*
@@ -324,6 +335,13 @@ BitVector PPCRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   if (!Subtarget.hasAltivec())
     for (TargetRegisterClass::iterator I = PPC::VRRCRegClass.begin(),
          IE = PPC::VRRCRegClass.end(); I != IE; ++I)
+      markSuperRegs(Reserved, *I);
+
+  // Reserve Paired Single registers when PS is unavailable.
+  if (!Subtarget.hasPaired())
+    for (TargetRegisterClass::iterator I = PPC::PSRCRegClass.begin(),
+                                       IE = PPC::PSRCRegClass.end();
+         I != IE; ++I)
       markSuperRegs(Reserved, *I);
 
   assert(checkAllSuperRegsMarked(Reserved));

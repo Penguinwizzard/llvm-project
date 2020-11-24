@@ -75,6 +75,7 @@ void PPCSubtarget::initializeEnvironment() {
   Use64BitRegs = false;
   UseCRBits = false;
   HasHardFloat = false;
+  HasPaired = false;
   HasAltivec = false;
   HasSPE = false;
   HasFPU = false;
@@ -170,6 +171,11 @@ void PPCSubtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
   if (HasSPE && (HasAltivec || HasVSX || HasFPU))
     report_fatal_error(
         "SPE and traditional floating point cannot both be enabled.\n", false);
+
+  if (HasPaired && IsPPC64)
+    report_fatal_error("Paired Single is only supported for 32-bit targets.\n", false);
+  if (HasPaired && HasAltivec)
+    report_fatal_error("Paired Single and Altivec cannot both be enabled.\n", false);
 
   // If not SPE, set standard FPU
   if (!HasSPE)

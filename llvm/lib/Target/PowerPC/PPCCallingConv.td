@@ -61,6 +61,7 @@ def RetCC_PPC_Cold : CallingConv<[
   CCIfType<[f64], CCAssignToReg<[F1]>>,
   CCIfType<[f128], CCIfSubtarget<"hasP9Vector()", CCAssignToReg<[V2]>>>,
 
+  CCIfType<[v2f32], CCIfSubtarget<"hasPaired()", CCAssignToReg<[PSF1]>>>,
   CCIfType<[v16i8, v8i16, v4i32, v2i64, v1i128, v4f32, v2f64],
            CCIfSubtarget<"hasAltivec()",
            CCAssignToReg<[V2]>>>
@@ -95,11 +96,13 @@ def RetCC_PPC : CallingConv<[
            CCIfSubtarget<"hasP9Vector()",
            CCAssignToReg<[V2, V3, V4, V5, V6, V7, V8, V9]>>>,
 
+  CCIfType<[v2f32], CCIfSubtarget<"hasPaired()",
+           CCAssignToReg<[PSF1, PSF2, PSF3, PSF4, PSF5, PSF6, PSF7, PSF8]>>>,
   // Vector types returned as "direct" go into V2 .. V9; note that only the
   // ELFv2 ABI fully utilizes all these registers.
   CCIfType<[v16i8, v8i16, v4i32, v2i64, v1i128, v4f32, v2f64],
            CCIfSubtarget<"hasAltivec()",
-           CCAssignToReg<[V2, V3, V4, V5, V6, V7, V8, V9]>>>
+           CCAssignToReg<[V2, V3, V4, V5, V6, V7, V8, V9]>>>,
 ]>;
 
 // No explicit register is specified for the AnyReg calling convention. The
@@ -151,6 +154,9 @@ def RetCC_PPC64_ELF_FIS : CallingConv<[
   CCIfType<[f128],
            CCIfSubtarget<"hasP9Vector()",
            CCAssignToReg<[V2, V3, V4, V5, V6, V7, V8, V9]>>>,
+  CCIfType<[v2f32],
+           CCIfSubtarget<"hasPaired()",
+           CCAssignToReg<[PSF1, PSF2, PSF3, PSF4, PSF5, PSF6, PSF7, PSF8]>>>,
   CCIfType<[v16i8, v8i16, v4i32, v2i64, v1i128, v4f32, v2f64],
            CCIfSubtarget<"hasAltivec()",
            CCAssignToReg<[V2, V3, V4, V5, V6, V7, V8, V9]>>>
@@ -231,6 +237,8 @@ def CC_PPC32_SVR4_VarArg : CallingConv<[
 // put vector arguments in vector registers before putting them on the stack.
 let Entry = 1 in
 def CC_PPC32_SVR4 : CallingConv<[
+  CCIfType<[v2f32], CCIfSubtarget<"hasPaired()",
+           CCAssignToReg<[PSF1, PSF2, PSF3, PSF4, PSF5, PSF6, PSF7, PSF8]>>>,
   // The first 12 Vector arguments are passed in AltiVec registers.
   CCIfType<[v16i8, v8i16, v4i32, v2i64, v1i128, v4f32, v2f64],
            CCIfSubtarget<"hasAltivec()", CCAssignToReg<[V2, V3, V4, V5, V6, V7,
@@ -264,6 +272,10 @@ def CC_PPC32_SVR4_ByVal : CallingConv<[
   CCCustom<"CC_PPC32_SVR4_Custom_Dummy">
 ]>;
 
+def CSR_Paired : CalleeSavedRegs<(add PSF14, PSF15, PSF16, PSF17, PSF18, PSF19,
+                                  PSF20, PSF21, PSF22, PSF23, PSF24, PSF25,
+                                  PSF26, PSF27, PSF28, PSF29, PSF30, PSF31)>;
+
 def CSR_Altivec : CalleeSavedRegs<(add V20, V21, V22, V23, V24, V25, V26, V27,
                                        V28, V29, V30, V31)>;
 
@@ -279,6 +291,8 @@ def CSR_SVR432 :  CalleeSavedRegs<(add CSR_SVR432_COMM, F14, F15, F16, F17, F18,
 def CSR_SPE : CalleeSavedRegs<(add S14, S15, S16, S17, S18, S19, S20, S21, S22,
                                    S23, S24, S25, S26, S27, S28, S29, S30, S31
                               )>;
+
+def CSR_SVR432_Paired : CalleeSavedRegs<(add CSR_SVR432, CSR_Paired)>;
 
 def CSR_SVR432_Altivec : CalleeSavedRegs<(add CSR_SVR432, CSR_Altivec)>;
 
@@ -323,6 +337,8 @@ def CSR_SVR32_ColdCC_Common : CalleeSavedRegs<(add (sequence "R%u", 4, 10),
 def CSR_SVR32_ColdCC : CalleeSavedRegs<(add CSR_SVR32_ColdCC_Common,
                                           F0, (sequence "F%u", 2, 31))>;
 
+def CSR_SVR32_ColdCC_Paired : CalleeSavedRegs<(add CSR_SVR32_ColdCC,
+                                          PSF0, (sequence "PSF%u", 2, 31))>;
 
 def CSR_SVR32_ColdCC_Altivec : CalleeSavedRegs<(add CSR_SVR32_ColdCC,
                                             (sequence "V%u", 0, 1),

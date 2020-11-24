@@ -110,6 +110,12 @@ static DecodeStatus DecodeF8RCRegisterClass(MCInst &Inst, uint64_t RegNo,
   return decodeRegisterClass(Inst, RegNo, FRegs);
 }
 
+static DecodeStatus DecodePSRCRegisterClass(MCInst &Inst, uint64_t RegNo,
+                                            uint64_t Address,
+                                            const void *Decoder) {
+  return decodeRegisterClass(Inst, RegNo, PSRegs);
+}
+
 static DecodeStatus DecodeVFRCRegisterClass(MCInst &Inst, uint64_t RegNo,
                                             uint64_t Address,
                                             const void *Decoder) {
@@ -419,6 +425,13 @@ DecodeStatus PPCDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
   if (STI.getFeatureBits()[PPC::FeatureSPE]) {
     DecodeStatus result =
         decodeInstruction(DecoderTableSPE32, MI, Inst, Address, this, STI);
+    if (result != MCDisassembler::Fail)
+      return result;
+  }
+
+  if (STI.getFeatureBits()[PPC::FeaturePaired]) {
+    DecodeStatus result = decodeInstruction(DecoderTablePairedSingle32, MI,
+                                            Inst, Address, this, STI);
     if (result != MCDisassembler::Fail)
       return result;
   }

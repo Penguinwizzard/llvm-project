@@ -97,6 +97,7 @@ protected:
   bool UseCRBits;
   bool HasHardFloat;
   bool IsPPC64;
+  bool HasPaired;
   bool HasAltivec;
   bool HasFPU;
   bool HasSPE;
@@ -258,6 +259,7 @@ public:
   bool hasLFIWAX() const { return HasLFIWAX; }
   bool hasFPRND() const { return HasFPRND; }
   bool hasFPCVT() const { return HasFPCVT; }
+  bool hasPaired() const { return HasPaired; }
   bool hasAltivec() const { return HasAltivec; }
   bool hasSPE() const { return HasSPE; }
   bool hasFPU() const { return HasFPU; }
