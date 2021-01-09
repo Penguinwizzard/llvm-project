@@ -137,7 +137,24 @@ public:
       : RK(R), Target(R), PredicateNamespace(std::move(PredicateNamespace)),
         GuardPrefix(std::move(GPrefix)), GuardPostfix(std::move(GPostfix)),
         ReturnOK(std::move(ROK)), ReturnFail(std::move(RFail)),
-        Locals(std::move(L)) {}
+        Locals(std::move(L))
+        {
+          if(Target.getTargetLanguage() == TargetLangType::C) {
+            size_t index;
+            index = GuardPostfix.find("::");
+            if(index != std::string::npos) {
+              GuardPostfix.replace(index, 2, "_");
+            }
+            index = ReturnOK.find("::");
+            if(index != std::string::npos) {
+              ReturnOK.replace(index, 2, "_");
+            }
+            index = ReturnFail.find("::");
+            if(index != std::string::npos) {
+              ReturnFail.replace(index, 2, "_");
+            }
+          }
+        }
 
   // Emit the decoder state machine table.
   void emitTable(formatted_raw_ostream &o, DecoderTable &Table,
@@ -155,6 +172,8 @@ public:
 
 private:
   CodeGenTarget Target;
+
+  friend class FilterChooser;
 
 public:
   std::string PredicateNamespace;
@@ -756,6 +775,14 @@ void FixedLenDecoderEmitter::emitTable(formatted_raw_ostream &OS,
 
   Indentation += 2;
 
+  std::string joiner;
+
+  if(Target.getTargetLanguage() == TargetLangType::CPP) {
+    joiner = "::";
+  } else if(Target.getTargetLanguage() == TargetLangType::C) {
+    joiner = "_";
+  }
+
   // FIXME: We may be able to use the NumToSkip values to recover
   // appropriate indentation levels.
   DecoderTable::const_iterator I = Table.begin();
@@ -774,7 +801,7 @@ void FixedLenDecoderEmitter::emitTable(formatted_raw_ostream &OS,
       ++I;
       unsigned Start = *I++;
       unsigned Len = *I++;
-      OS.indent(Indentation) << "MCD::OPC_ExtractField, " << Start << ", "
+      OS.indent(Indentation) << "MCD" << joiner << "OPC_ExtractField, " << Start << ", "
         << Len << ",  // Inst{";
       if (Len > 1)
         OS << (Start + Len - 1) << "-";
@@ -783,7 +810,7 @@ void FixedLenDecoderEmitter::emitTable(formatted_raw_ostream &OS,
     }
     case MCD::OPC_FilterValue: {
       ++I;
-      OS.indent(Indentation) << "MCD::OPC_FilterValue, ";
+      OS.indent(Indentation) << "MCD" << joiner << "OPC_FilterValue, ";
       // The filter value is ULEB128 encoded.
       while (*I >= 128)
         OS << (unsigned)*I++ << ", ";
@@ -806,7 +833,7 @@ void FixedLenDecoderEmitter::emitTable(formatted_raw_ostream &OS,
       ++I;
       unsigned Start = *I++;
       unsigned Len = *I++;
-      OS.indent(Indentation) << "MCD::OPC_CheckField, " << Start << ", "
+      OS.indent(Indentation) << "MCD" << joiner << "OPC_CheckField, " << Start << ", "
         << Len << ", ";// << Val << ", " << NumToSkip << ",\n";
       // ULEB128 encoded field value.
       for (; *I >= 128; ++I)
@@ -827,7 +854,7 @@ void FixedLenDecoderEmitter::emitTable(formatted_raw_ostream &OS,
     }
     case MCD::OPC_CheckPredicate: {
       ++I;
-      OS.indent(Indentation) << "MCD::OPC_CheckPredicate, ";
+      OS.indent(Indentation) << "MCD" << joiner << "OPC_CheckPredicate, ";
       for (; *I >= 128; ++I)
         OS << (unsigned)*I << ", ";
       OS << (unsigned)*I++ << ", ";
@@ -856,7 +883,7 @@ void FixedLenDecoderEmitter::emitTable(formatted_raw_ostream &OS,
                && "ULEB128 value too large!");
       // Decode the Opcode value.
       unsigned Opc = decodeULEB128(Buffer);
-      OS.indent(Indentation) << "MCD::OPC_" << (IsTry ? "Try" : "")
+      OS.indent(Indentation) << "MCD" << joiner << "OPC_" << (IsTry ? "Try" : "")
         << "Decode, ";
       for (p = Buffer; *p >= 128; ++p)
         OS << (unsigned)*p << ", ";
@@ -891,7 +918,7 @@ void FixedLenDecoderEmitter::emitTable(formatted_raw_ostream &OS,
     }
     case MCD::OPC_SoftFail: {
       ++I;
-      OS.indent(Indentation) << "MCD::OPC_SoftFail";
+      OS.indent(Indentation) << "MCD" << joiner << "OPC_SoftFail";
       // Positive mask
       uint64_t Value = 0;
       unsigned Shift = 0;
@@ -923,7 +950,7 @@ void FixedLenDecoderEmitter::emitTable(formatted_raw_ostream &OS,
     }
     case MCD::OPC_Fail: {
       ++I;
-      OS.indent(Indentation) << "MCD::OPC_Fail,\n";
+      OS.indent(Indentation) << "MCD" << joiner << "OPC_Fail,\n";
       break;
     }
     }
@@ -940,8 +967,13 @@ emitPredicateFunction(formatted_raw_ostream &OS, PredicateSet &Predicates,
                       unsigned Indentation) const {
   // The predicate function is just a big switch statement based on the
   // input predicate index.
-  OS.indent(Indentation) << "static bool checkDecoderPredicate(unsigned Idx, "
-    << "const FeatureBitset &Bits) {\n";
+  if(Target.getTargetLanguage() == TargetLangType::CPP) {
+    OS.indent(Indentation) << "static bool checkDecoderPredicate(unsigned Idx, "
+      << "const FeatureBitset &Bits) {\n";
+  } else if(Target.getTargetLanguage() == TargetLangType::C) {
+    OS.indent(Indentation) << "static bool checkDecoderPredicate(unsigned Idx, "
+      << "const FeatureBitset *Bits) {\n";
+  }
   Indentation += 2;
   if (!Predicates.empty()) {
     OS.indent(Indentation) << "switch (Idx) {\n";
@@ -965,14 +997,25 @@ emitDecoderFunction(formatted_raw_ostream &OS, DecoderSet &Decoders,
                     unsigned Indentation) const {
   // The decoder function is just a big switch statement based on the
   // input decoder index.
-  OS.indent(Indentation) << "template <typename InsnType>\n";
-  OS.indent(Indentation) << "static DecodeStatus decodeToMCInst(DecodeStatus S,"
-    << " unsigned Idx, InsnType insn, MCInst &MI,\n";
-  OS.indent(Indentation) << "                                   uint64_t "
-    << "Address, const void *Decoder, bool &DecodeComplete) {\n";
-  Indentation += 2;
-  OS.indent(Indentation) << "DecodeComplete = true;\n";
-  OS.indent(Indentation) << "InsnType tmp;\n";
+  if(Target.getTargetLanguage() == TargetLangType::CPP) {
+    OS.indent(Indentation) << "template <typename InsnType>\n";
+    OS.indent(Indentation) << "static DecodeStatus decodeToMCInst(DecodeStatus S,"
+      << " unsigned Idx, InsnType insn, MCInst &MI,\n";
+    OS.indent(Indentation) << "                                   uint64_t "
+      << "Address, const void *Decoder, bool &DecodeComplete) {\n";
+    Indentation += 2;
+    OS.indent(Indentation) << "DecodeComplete = true;\n";
+    OS.indent(Indentation) << "InsnType tmp;\n";
+  } else if(Target.getTargetLanguage() == TargetLangType::C) {
+    OS.indent(Indentation) << "static DecodeStatus decodeToMCInst(DecodeStatus S,"
+      << " unsigned Idx, uint32_t insn, MCInst *MI,\n";
+    OS.indent(Indentation) << "                                   uint64_t "
+      << "Address, const void *Decoder, bool *DecodeComplete) {\n";
+    Indentation += 2;
+    OS.indent(Indentation) << "*DecodeComplete = true;\n";
+    OS.indent(Indentation) << "// This is longer than the InsnType due to needing to hold long immediates\n";
+    OS.indent(Indentation) << "uint64_t tmp;\n";
+  }
   OS.indent(Indentation) << "switch (Idx) {\n";
   OS.indent(Indentation) << "default: llvm_unreachable(\"Invalid index!\");\n";
   unsigned Index = 0;
@@ -1115,11 +1158,17 @@ void FilterChooser::emitBinaryParser(raw_ostream &o, unsigned &Indentation,
   for (const EncodingField &EF : OpInfo) {
     o.indent(Indentation) << "tmp ";
     if (OpInfo.numFields() != 1 || OpInfo.InitValue != 0) o << '|';
-    o << "= fieldFromInstruction"
-      << "(insn, " << EF.Base << ", " << EF.Width << ')';
+    o << "= ((uint64_t)fieldFromInstruction"
+      << "(insn, " << EF.Base << ", " << EF.Width << "))";
     if (OpInfo.numFields() != 1 || EF.Offset != 0)
       o << " << " << EF.Offset;
     o << ";\n";
+  }
+  std::string joiner;
+  if(Emitter->Target.getTargetLanguage() == TargetLangType::CPP) {
+    joiner = "::";
+  } else if(Emitter->Target.getTargetLanguage() == TargetLangType::C) {
+    joiner = "_";
   }
 
   if (Decoder != "") {
@@ -1128,10 +1177,14 @@ void FilterChooser::emitBinaryParser(raw_ostream &o, unsigned &Indentation,
       << "(MI, tmp, Address, Decoder)"
       << Emitter->GuardPostfix
       << " { " << (OpHasCompleteDecoder ? "" : "DecodeComplete = false; ")
-      << "return MCDisassembler::Fail; }\n";
+      << "return MCDisassembler" << joiner << "Fail; }\n";
   } else {
     OpHasCompleteDecoder = true;
-    o.indent(Indentation) << "MI.addOperand(MCOperand::createImm(tmp));\n";
+    if(Emitter->Target.getTargetLanguage() == TargetLangType::CPP) {
+      o.indent(Indentation) << "MI.addOperand(MCOperand" << joiner << "createImm(tmp));\n";
+    } else if(Emitter->Target.getTargetLanguage() == TargetLangType::C) {
+      o.indent(Indentation) << "MCOperand_CreateImm0(MI, tmp);\n";
+    }
   }
 }
 
@@ -1143,11 +1196,17 @@ void FilterChooser::emitDecoder(raw_ostream &OS, unsigned Indentation,
     // If a custom instruction decoder was specified, use that.
     if (Op.numFields() == 0 && !Op.Decoder.empty()) {
       HasCompleteDecoder = Op.HasCompleteDecoder;
+      std::string joiner;
+      if(Emitter->Target.getTargetLanguage() == TargetLangType::CPP) {
+        joiner = "::";
+      } else if(Emitter->Target.getTargetLanguage() == TargetLangType::C) {
+        joiner = "_";
+      }
       OS.indent(Indentation) << Emitter->GuardPrefix << Op.Decoder
         << "(MI, insn, Address, Decoder)"
         << Emitter->GuardPostfix
         << " { " << (HasCompleteDecoder ? "" : "DecodeComplete = false; ")
-        << "return MCDisassembler::Fail; }\n";
+        << "return MCDisassembler" << joiner << "Fail; }\n";
       break;
     }
 
@@ -1187,6 +1246,12 @@ bool FilterChooser::emitPredicateMatch(raw_ostream &o, unsigned &Indentation,
   ListInit *Predicates =
       AllInstructions[Opc].EncodingDef->getValueAsListInit("Predicates");
   bool IsFirstEmission = true;
+  std::string joiner;
+  if(Emitter->Target.getTargetLanguage() == TargetLangType::CPP) {
+    joiner = "::";
+  } else if(Emitter->Target.getTargetLanguage() == TargetLangType::C) {
+    joiner = "_";
+  }
   for (unsigned i = 0; i < Predicates->size(); ++i) {
     Record *Pred = Predicates->getElementAsRecord(i);
     if (!Pred->getValue("AssemblerMatcherPredicate"))
@@ -1227,7 +1292,7 @@ bool FilterChooser::emitPredicateMatch(raw_ostream &o, unsigned &Indentation,
       if (!isa<DefInit>(Arg) ||
           !cast<DefInit>(Arg)->getDef()->isSubClassOf("SubtargetFeature"))
         PrintFatalError(Pred->getLoc(), "Invalid AssemblerCondDag!");
-      o << "Bits[" << Emitter->PredicateNamespace << "::" << Arg->getAsString()
+      o << "Bits[" << Emitter->PredicateNamespace << joiner << Arg->getAsString()
         << "]";
 
       First = false;
@@ -1823,6 +1888,7 @@ populateInstruction(CodeGenTarget &Target, const Record &EncodingDef,
   // If the instruction has specified a custom decoding hook, use that instead
   // of trying to auto-generate the decoder.
   StringRef InstDecoder = EncodingDef.getValueAsString("DecoderMethod");
+
   if (InstDecoder != "") {
     bool HasCompleteInstDecoder = EncodingDef.getValueAsBit("hasCompleteDecoder");
     InsnOperands.push_back(
@@ -1984,6 +2050,20 @@ populateInstruction(CodeGenTarget &Target, const Record &EncodingDef,
       if (!isReg && String && String->getValue() != "")
         Decoder = std::string(String->getValue());
 
+      if(Target.getTargetLanguage() == TargetLangType::C) {
+        // We need to replace templated calls here with equivalent non-templated calls.
+        // More overhead for whatever code wraps this, but it should be workable
+        size_t index;
+        index = Decoder.find("<");
+        if(index != std::string::npos) {
+          Decoder.replace(index, 1, "_");
+        }
+        index = Decoder.find(">");
+        if(index != std::string::npos) {
+          Decoder.replace(index, 1, "_");
+        }
+      }
+
       RecordVal *HasCompleteDecoderVal =
         TypeRecord->getValue("hasCompleteDecoder");
       BitInit *HasCompleteDecoderBit = HasCompleteDecoderVal ?
@@ -2043,6 +2123,19 @@ populateInstruction(CodeGenTarget &Target, const Record &EncodingDef,
     // to interpret it.  As a first step, require the target to provide
     // callbacks for decoding register classes.
     std::string Decoder = findOperandDecoderMethod(TI);
+    if(Target.getTargetLanguage() == TargetLangType::C) {
+      // We need to replace templated calls here with equivalent non-templated calls.
+      // More overhead for whatever code wraps this, but it should be workable
+      size_t index;
+      index = Decoder.find("<");
+      if(index != std::string::npos) {
+        Decoder.replace(index, 1, "_");
+      }
+      index = Decoder.find(">");
+      if(index != std::string::npos) {
+        Decoder.replace(index, 1, "_");
+      }
+    }
     Record *TypeRecord = cast<DefInit>(TI)->getDef();
 
     RecordVal *HasCompleteDecoderVal =
@@ -2145,262 +2238,444 @@ populateInstruction(CodeGenTarget &Target, const Record &EncodingDef,
 // On Windows we make sure that this function is not inlined when
 // using the VS compiler. It has a bug which causes the function
 // to be optimized out in some circustances. See llvm.org/pr38292
-static void emitFieldFromInstruction(formatted_raw_ostream &OS) {
-  OS << "// Helper functions for extracting fields from encoded instructions.\n"
-     << "// InsnType must either be integral or an APInt-like object that "
-        "must:\n"
-     << "// * Have a static const max_size_in_bits equal to the number of bits "
-        "in the\n"
-     << "//   encoding.\n"
-     << "// * be default-constructible and copy-constructible\n"
-     << "// * be constructible from a uint64_t\n"
-     << "// * be constructible from an APInt (this can be private)\n"
-     << "// * Support getBitsSet(loBit, hiBit)\n"
-     << "// * be convertible to uint64_t\n"
-     << "// * Support the ~, &, ==, !=, and |= operators with other objects of "
-        "the same type\n"
-     << "// * Support shift (<<, >>) with signed and unsigned integers on the "
-        "RHS\n"
-     << "// * Support put (<<) to raw_ostream&\n"
-     << "template <typename InsnType>\n"
-     << "#if defined(_MSC_VER) && !defined(__clang__)\n"
-     << "__declspec(noinline)\n"
-     << "#endif\n"
-     << "static InsnType fieldFromInstruction(InsnType insn, unsigned "
-        "startBit,\n"
-     << "                                     unsigned numBits, "
-        "std::true_type) {\n"
-     << "  assert(startBit + numBits <= 64 && \"Cannot support >64-bit "
-        "extractions!\");\n"
-     << "  assert(startBit + numBits <= (sizeof(InsnType) * 8) &&\n"
-     << "         \"Instruction field out of bounds!\");\n"
-     << "  InsnType fieldMask;\n"
-     << "  if (numBits == sizeof(InsnType) * 8)\n"
-     << "    fieldMask = (InsnType)(-1LL);\n"
-     << "  else\n"
-     << "    fieldMask = (((InsnType)1 << numBits) - 1) << startBit;\n"
-     << "  return (insn & fieldMask) >> startBit;\n"
-     << "}\n"
-     << "\n"
-     << "template <typename InsnType>\n"
-     << "static InsnType fieldFromInstruction(InsnType insn, unsigned "
-        "startBit,\n"
-     << "                                     unsigned numBits, "
-        "std::false_type) {\n"
-     << "  assert(startBit + numBits <= InsnType::max_size_in_bits && "
-        "\"Instruction field out of bounds!\");\n"
-     << "  InsnType fieldMask = InsnType::getBitsSet(0, numBits);\n"
-     << "  return (insn >> startBit) & fieldMask;\n"
-     << "}\n"
-     << "\n"
-     << "template <typename InsnType>\n"
-     << "static InsnType fieldFromInstruction(InsnType insn, unsigned "
-        "startBit,\n"
-     << "                                     unsigned numBits) {\n"
-     << "  return fieldFromInstruction(insn, startBit, numBits, "
-        "std::is_integral<InsnType>());\n"
-     << "}\n\n";
+static void emitFieldFromInstruction(formatted_raw_ostream &OS,
+                                     TargetLangType TargetLanguage) {
+  if(TargetLanguage == TargetLangType::CPP) {
+    OS << "// Helper functions for extracting fields from encoded instructions.\n"
+       << "// InsnType must either be integral or an APInt-like object that "
+          "must:\n"
+       << "// * Have a static const max_size_in_bits equal to the number of bits "
+          "in the\n"
+       << "//   encoding.\n"
+       << "// * be default-constructible and copy-constructible\n"
+       << "// * be constructible from a uint64_t\n"
+       << "// * be constructible from an APInt (this can be private)\n"
+       << "// * Support getBitsSet(loBit, hiBit)\n"
+       << "// * be convertible to uint64_t\n"
+       << "// * Support the ~, &, ==, !=, and |= operators with other objects of "
+          "the same type\n"
+       << "// * Support shift (<<, >>) with signed and unsigned integers on the "
+          "RHS\n"
+       << "// * Support put (<<) to raw_ostream&\n"
+       << "template <typename InsnType>\n"
+       << "#if defined(_MSC_VER) && !defined(__clang__)\n"
+       << "__declspec(noinline)\n"
+       << "#endif\n"
+       << "static InsnType fieldFromInstruction(InsnType insn, unsigned "
+          "startBit,\n"
+       << "                                     unsigned numBits, "
+          "std::true_type) {\n"
+       << "  assert(startBit + numBits <= 64 && \"Cannot support >64-bit "
+          "extractions!\");\n"
+       << "  assert(startBit + numBits <= (sizeof(InsnType) * 8) &&\n"
+       << "         \"Instruction field out of bounds!\");\n"
+       << "  InsnType fieldMask;\n"
+       << "  if (numBits == sizeof(InsnType) * 8)\n"
+       << "    fieldMask = (InsnType)(-1LL);\n"
+       << "  else\n"
+       << "    fieldMask = (((InsnType)1 << numBits) - 1) << startBit;\n"
+       << "  return (insn & fieldMask) >> startBit;\n"
+       << "}\n"
+       << "\n"
+       << "template <typename InsnType>\n"
+       << "static InsnType fieldFromInstruction(InsnType insn, unsigned "
+          "startBit,\n"
+       << "                                     unsigned numBits, "
+          "std::false_type) {\n"
+       << "  assert(startBit + numBits <= InsnType::max_size_in_bits && "
+          "\"Instruction field out of bounds!\");\n"
+       << "  InsnType fieldMask = InsnType::getBitsSet(0, numBits);\n"
+       << "  return (insn >> startBit) & fieldMask;\n"
+       << "}\n"
+       << "\n"
+       << "template <typename InsnType>\n"
+       << "static InsnType fieldFromInstruction(InsnType insn, unsigned "
+          "startBit,\n"
+       << "                                     unsigned numBits) {\n"
+       << "  return fieldFromInstruction(insn, startBit, numBits, "
+          "std::is_integral<InsnType>());\n"
+       << "}\n\n";
+  } else if(TargetLanguage == TargetLangType::C) {
+    std::string InsnTypeName = "uint32_t";
+    OS << "// Helper functions for extracting fields from encoded instructions.\n"
+       << "#if defined(_MSC_VER) && !defined(__clang__)\n"
+       << "__declspec(noinline)\n"
+       << "#endif\n"
+       << "static " << InsnTypeName << " fieldFromInstruction(" << InsnTypeName << " insn, unsigned "
+          "startBit,\n"
+       << "                                     unsigned numBits) {\n"
+       << "  assert(startBit + numBits <= 64 && \"Cannot support >64-bit "
+          "extractions!\");\n"
+       << "  assert(startBit + numBits <= (sizeof(" << InsnTypeName << ") * 8) &&\n"
+       << "         \"Instruction field out of bounds!\");\n"
+       << "  " << InsnTypeName << " fieldMask;\n"
+       << "  if (numBits == sizeof(" << InsnTypeName << ") * 8)\n"
+       << "    fieldMask = (" << InsnTypeName << ")(-1LL);\n"
+       << "  else\n"
+       << "    fieldMask = (((" << InsnTypeName << ")1 << numBits) - 1) << startBit;\n"
+       << "  return (insn & fieldMask) >> startBit;\n"
+       << "}\n"
+       << "\n";
+  }
 }
 
 // emitDecodeInstruction - Emit the templated helper function
 // decodeInstruction().
-static void emitDecodeInstruction(formatted_raw_ostream &OS) {
-  OS << "template <typename InsnType>\n"
-     << "static DecodeStatus decodeInstruction(const uint8_t DecodeTable[], "
-        "MCInst &MI,\n"
-     << "                                      InsnType insn, uint64_t "
-        "Address,\n"
-     << "                                      const void *DisAsm,\n"
-     << "                                      const MCSubtargetInfo &STI) {\n"
-     << "  const FeatureBitset &Bits = STI.getFeatureBits();\n"
-     << "\n"
-     << "  const uint8_t *Ptr = DecodeTable;\n"
-     << "  InsnType CurFieldValue = 0;\n"
-     << "  DecodeStatus S = MCDisassembler::Success;\n"
-     << "  while (true) {\n"
-     << "    ptrdiff_t Loc = Ptr - DecodeTable;\n"
-     << "    switch (*Ptr) {\n"
-     << "    default:\n"
-     << "      errs() << Loc << \": Unexpected decode table opcode!\\n\";\n"
-     << "      return MCDisassembler::Fail;\n"
-     << "    case MCD::OPC_ExtractField: {\n"
-     << "      unsigned Start = *++Ptr;\n"
-     << "      unsigned Len = *++Ptr;\n"
-     << "      ++Ptr;\n"
-     << "      CurFieldValue = fieldFromInstruction(insn, Start, Len);\n"
-     << "      LLVM_DEBUG(dbgs() << Loc << \": OPC_ExtractField(\" << Start << "
-        "\", \"\n"
-     << "                   << Len << \"): \" << CurFieldValue << \"\\n\");\n"
-     << "      break;\n"
-     << "    }\n"
-     << "    case MCD::OPC_FilterValue: {\n"
-     << "      // Decode the field value.\n"
-     << "      unsigned Len;\n"
-     << "      InsnType Val = decodeULEB128(++Ptr, &Len);\n"
-     << "      Ptr += Len;\n"
-     << "      // NumToSkip is a plain 24-bit integer.\n"
-     << "      unsigned NumToSkip = *Ptr++;\n"
-     << "      NumToSkip |= (*Ptr++) << 8;\n"
-     << "      NumToSkip |= (*Ptr++) << 16;\n"
-     << "\n"
-     << "      // Perform the filter operation.\n"
-     << "      if (Val != CurFieldValue)\n"
-     << "        Ptr += NumToSkip;\n"
-     << "      LLVM_DEBUG(dbgs() << Loc << \": OPC_FilterValue(\" << Val << "
-        "\", \" << NumToSkip\n"
-     << "                   << \"): \" << ((Val != CurFieldValue) ? \"FAIL:\" "
-        ": \"PASS:\")\n"
-     << "                   << \" continuing at \" << (Ptr - DecodeTable) << "
-        "\"\\n\");\n"
-     << "\n"
-     << "      break;\n"
-     << "    }\n"
-     << "    case MCD::OPC_CheckField: {\n"
-     << "      unsigned Start = *++Ptr;\n"
-     << "      unsigned Len = *++Ptr;\n"
-     << "      InsnType FieldValue = fieldFromInstruction(insn, Start, Len);\n"
-     << "      // Decode the field value.\n"
-     << "      InsnType ExpectedValue = decodeULEB128(++Ptr, &Len);\n"
-     << "      Ptr += Len;\n"
-     << "      // NumToSkip is a plain 24-bit integer.\n"
-     << "      unsigned NumToSkip = *Ptr++;\n"
-     << "      NumToSkip |= (*Ptr++) << 8;\n"
-     << "      NumToSkip |= (*Ptr++) << 16;\n"
-     << "\n"
-     << "      // If the actual and expected values don't match, skip.\n"
-     << "      if (ExpectedValue != FieldValue)\n"
-     << "        Ptr += NumToSkip;\n"
-     << "      LLVM_DEBUG(dbgs() << Loc << \": OPC_CheckField(\" << Start << "
-        "\", \"\n"
-     << "                   << Len << \", \" << ExpectedValue << \", \" << "
-        "NumToSkip\n"
-     << "                   << \"): FieldValue = \" << FieldValue << \", "
-        "ExpectedValue = \"\n"
-     << "                   << ExpectedValue << \": \"\n"
-     << "                   << ((ExpectedValue == FieldValue) ? \"PASS\\n\" : "
-        "\"FAIL\\n\"));\n"
-     << "      break;\n"
-     << "    }\n"
-     << "    case MCD::OPC_CheckPredicate: {\n"
-     << "      unsigned Len;\n"
-     << "      // Decode the Predicate Index value.\n"
-     << "      unsigned PIdx = decodeULEB128(++Ptr, &Len);\n"
-     << "      Ptr += Len;\n"
-     << "      // NumToSkip is a plain 24-bit integer.\n"
-     << "      unsigned NumToSkip = *Ptr++;\n"
-     << "      NumToSkip |= (*Ptr++) << 8;\n"
-     << "      NumToSkip |= (*Ptr++) << 16;\n"
-     << "      // Check the predicate.\n"
-     << "      bool Pred;\n"
-     << "      if (!(Pred = checkDecoderPredicate(PIdx, Bits)))\n"
-     << "        Ptr += NumToSkip;\n"
-     << "      (void)Pred;\n"
-     << "      LLVM_DEBUG(dbgs() << Loc << \": OPC_CheckPredicate(\" << PIdx "
-        "<< \"): \"\n"
-     << "            << (Pred ? \"PASS\\n\" : \"FAIL\\n\"));\n"
-     << "\n"
-     << "      break;\n"
-     << "    }\n"
-     << "    case MCD::OPC_Decode: {\n"
-     << "      unsigned Len;\n"
-     << "      // Decode the Opcode value.\n"
-     << "      unsigned Opc = decodeULEB128(++Ptr, &Len);\n"
-     << "      Ptr += Len;\n"
-     << "      unsigned DecodeIdx = decodeULEB128(Ptr, &Len);\n"
-     << "      Ptr += Len;\n"
-     << "\n"
-     << "      MI.clear();\n"
-     << "      MI.setOpcode(Opc);\n"
-     << "      bool DecodeComplete;\n"
-     << "      S = decodeToMCInst(S, DecodeIdx, insn, MI, Address, DisAsm, "
-        "DecodeComplete);\n"
-     << "      assert(DecodeComplete);\n"
-     << "\n"
-     << "      LLVM_DEBUG(dbgs() << Loc << \": OPC_Decode: opcode \" << Opc\n"
-     << "                   << \", using decoder \" << DecodeIdx << \": \"\n"
-     << "                   << (S != MCDisassembler::Fail ? \"PASS\" : "
-        "\"FAIL\") << \"\\n\");\n"
-     << "      return S;\n"
-     << "    }\n"
-     << "    case MCD::OPC_TryDecode: {\n"
-     << "      unsigned Len;\n"
-     << "      // Decode the Opcode value.\n"
-     << "      unsigned Opc = decodeULEB128(++Ptr, &Len);\n"
-     << "      Ptr += Len;\n"
-     << "      unsigned DecodeIdx = decodeULEB128(Ptr, &Len);\n"
-     << "      Ptr += Len;\n"
-     << "      // NumToSkip is a plain 24-bit integer.\n"
-     << "      unsigned NumToSkip = *Ptr++;\n"
-     << "      NumToSkip |= (*Ptr++) << 8;\n"
-     << "      NumToSkip |= (*Ptr++) << 16;\n"
-     << "\n"
-     << "      // Perform the decode operation.\n"
-     << "      MCInst TmpMI;\n"
-     << "      TmpMI.setOpcode(Opc);\n"
-     << "      bool DecodeComplete;\n"
-     << "      S = decodeToMCInst(S, DecodeIdx, insn, TmpMI, Address, DisAsm, "
-        "DecodeComplete);\n"
-     << "      LLVM_DEBUG(dbgs() << Loc << \": OPC_TryDecode: opcode \" << "
-        "Opc\n"
-     << "                   << \", using decoder \" << DecodeIdx << \": \");\n"
-     << "\n"
-     << "      if (DecodeComplete) {\n"
-     << "        // Decoding complete.\n"
-     << "        LLVM_DEBUG(dbgs() << (S != MCDisassembler::Fail ? \"PASS\" : "
-        "\"FAIL\") << \"\\n\");\n"
-     << "        MI = TmpMI;\n"
-     << "        return S;\n"
-     << "      } else {\n"
-     << "        assert(S == MCDisassembler::Fail);\n"
-     << "        // If the decoding was incomplete, skip.\n"
-     << "        Ptr += NumToSkip;\n"
-     << "        LLVM_DEBUG(dbgs() << \"FAIL: continuing at \" << (Ptr - "
-        "DecodeTable) << \"\\n\");\n"
-     << "        // Reset decode status. This also drops a SoftFail status "
-        "that could be\n"
-     << "        // set before the decode attempt.\n"
-     << "        S = MCDisassembler::Success;\n"
-     << "      }\n"
-     << "      break;\n"
-     << "    }\n"
-     << "    case MCD::OPC_SoftFail: {\n"
-     << "      // Decode the mask values.\n"
-     << "      unsigned Len;\n"
-     << "      InsnType PositiveMask = decodeULEB128(++Ptr, &Len);\n"
-     << "      Ptr += Len;\n"
-     << "      InsnType NegativeMask = decodeULEB128(Ptr, &Len);\n"
-     << "      Ptr += Len;\n"
-     << "      bool Fail = (insn & PositiveMask) || (~insn & NegativeMask);\n"
-     << "      if (Fail)\n"
-     << "        S = MCDisassembler::SoftFail;\n"
-     << "      LLVM_DEBUG(dbgs() << Loc << \": OPC_SoftFail: \" << (Fail ? "
-        "\"FAIL\\n\" : \"PASS\\n\"));\n"
-     << "      break;\n"
-     << "    }\n"
-     << "    case MCD::OPC_Fail: {\n"
-     << "      LLVM_DEBUG(dbgs() << Loc << \": OPC_Fail\\n\");\n"
-     << "      return MCDisassembler::Fail;\n"
-     << "    }\n"
-     << "    }\n"
-     << "  }\n"
-     << "  llvm_unreachable(\"bogosity detected in disassembler state "
-        "machine!\");\n"
-     << "}\n\n";
+static void emitDecodeInstruction(formatted_raw_ostream &OS,
+                                  TargetLangType TargetLanguage) {
+  if(TargetLanguage == TargetLangType::CPP) {
+    OS << "template <typename InsnType>\n"
+       << "static DecodeStatus decodeInstruction(const uint8_t DecodeTable[], "
+          "MCInst &MI,\n"
+       << "                                      InsnType insn, uint64_t "
+          "Address,\n"
+       << "                                      const void *DisAsm,\n"
+       << "                                      const MCSubtargetInfo &STI) {\n"
+       << "  const FeatureBitset &Bits = STI.getFeatureBits();\n"
+       << "\n"
+       << "  const uint8_t *Ptr = DecodeTable;\n"
+       << "  InsnType CurFieldValue = 0;\n"
+       << "  DecodeStatus S = MCDisassembler::Success;\n"
+       << "  while (true) {\n"
+       << "    ptrdiff_t Loc = Ptr - DecodeTable;\n"
+       << "    switch (*Ptr) {\n"
+       << "    default:\n"
+       << "      errs() << Loc << \": Unexpected decode table opcode!\\n\";\n"
+       << "      return MCDisassembler::Fail;\n"
+       << "    case MCD::OPC_ExtractField: {\n"
+       << "      unsigned Start = *++Ptr;\n"
+       << "      unsigned Len = *++Ptr;\n"
+       << "      ++Ptr;\n"
+       << "      CurFieldValue = fieldFromInstruction(insn, Start, Len);\n"
+       << "      LLVM_DEBUG(dbgs() << Loc << \": OPC_ExtractField(\" << Start << "
+          "\", \"\n"
+       << "                   << Len << \"): \" << CurFieldValue << \"\\n\");\n"
+       << "      break;\n"
+       << "    }\n"
+       << "    case MCD::OPC_FilterValue: {\n"
+       << "      // Decode the field value.\n"
+       << "      unsigned Len;\n"
+       << "      InsnType Val = decodeULEB128(++Ptr, &Len);\n"
+       << "      Ptr += Len;\n"
+       << "      // NumToSkip is a plain 24-bit integer.\n"
+       << "      unsigned NumToSkip = *Ptr++;\n"
+       << "      NumToSkip |= (*Ptr++) << 8;\n"
+       << "      NumToSkip |= (*Ptr++) << 16;\n"
+       << "\n"
+       << "      // Perform the filter operation.\n"
+       << "      if (Val != CurFieldValue)\n"
+       << "        Ptr += NumToSkip;\n"
+       << "      LLVM_DEBUG(dbgs() << Loc << \": OPC_FilterValue(\" << Val << "
+          "\", \" << NumToSkip\n"
+       << "                   << \"): \" << ((Val != CurFieldValue) ? \"FAIL:\" "
+          ": \"PASS:\")\n"
+       << "                   << \" continuing at \" << (Ptr - DecodeTable) << "
+          "\"\\n\");\n"
+       << "\n"
+       << "      break;\n"
+       << "    }\n"
+       << "    case MCD::OPC_CheckField: {\n"
+       << "      unsigned Start = *++Ptr;\n"
+       << "      unsigned Len = *++Ptr;\n"
+       << "      InsnType FieldValue = fieldFromInstruction(insn, Start, Len);\n"
+       << "      // Decode the field value.\n"
+       << "      InsnType ExpectedValue = decodeULEB128(++Ptr, &Len);\n"
+       << "      Ptr += Len;\n"
+       << "      // NumToSkip is a plain 24-bit integer.\n"
+       << "      unsigned NumToSkip = *Ptr++;\n"
+       << "      NumToSkip |= (*Ptr++) << 8;\n"
+       << "      NumToSkip |= (*Ptr++) << 16;\n"
+       << "\n"
+       << "      // If the actual and expected values don't match, skip.\n"
+       << "      if (ExpectedValue != FieldValue)\n"
+       << "        Ptr += NumToSkip;\n"
+       << "      LLVM_DEBUG(dbgs() << Loc << \": OPC_CheckField(\" << Start << "
+          "\", \"\n"
+       << "                   << Len << \", \" << ExpectedValue << \", \" << "
+          "NumToSkip\n"
+       << "                   << \"): FieldValue = \" << FieldValue << \", "
+          "ExpectedValue = \"\n"
+       << "                   << ExpectedValue << \": \"\n"
+       << "                   << ((ExpectedValue == FieldValue) ? \"PASS\\n\" : "
+          "\"FAIL\\n\"));\n"
+       << "      break;\n"
+       << "    }\n"
+       << "    case MCD::OPC_CheckPredicate: {\n"
+       << "      unsigned Len;\n"
+       << "      // Decode the Predicate Index value.\n"
+       << "      unsigned PIdx = decodeULEB128(++Ptr, &Len);\n"
+       << "      Ptr += Len;\n"
+       << "      // NumToSkip is a plain 24-bit integer.\n"
+       << "      unsigned NumToSkip = *Ptr++;\n"
+       << "      NumToSkip |= (*Ptr++) << 8;\n"
+       << "      NumToSkip |= (*Ptr++) << 16;\n"
+       << "      // Check the predicate.\n"
+       << "      bool Pred;\n"
+       << "      if (!(Pred = checkDecoderPredicate(PIdx, Bits)))\n"
+       << "        Ptr += NumToSkip;\n"
+       << "      (void)Pred;\n"
+       << "      LLVM_DEBUG(dbgs() << Loc << \": OPC_CheckPredicate(\" << PIdx "
+          "<< \"): \"\n"
+       << "            << (Pred ? \"PASS\\n\" : \"FAIL\\n\"));\n"
+       << "\n"
+       << "      break;\n"
+       << "    }\n"
+       << "    case MCD::OPC_Decode: {\n"
+       << "      unsigned Len;\n"
+       << "      // Decode the Opcode value.\n"
+       << "      unsigned Opc = decodeULEB128(++Ptr, &Len);\n"
+       << "      Ptr += Len;\n"
+       << "      unsigned DecodeIdx = decodeULEB128(Ptr, &Len);\n"
+       << "      Ptr += Len;\n"
+       << "\n"
+       << "      MI.clear();\n"
+       << "      MI.setOpcode(Opc);\n"
+       << "      bool DecodeComplete;\n"
+       << "      S = decodeToMCInst(S, DecodeIdx, insn, MI, Address, DisAsm, "
+          "DecodeComplete);\n"
+       << "      assert(DecodeComplete);\n"
+       << "\n"
+       << "      LLVM_DEBUG(dbgs() << Loc << \": OPC_Decode: opcode \" << Opc\n"
+       << "                   << \", using decoder \" << DecodeIdx << \": \"\n"
+       << "                   << (S != MCDisassembler::Fail ? \"PASS\" : "
+          "\"FAIL\") << \"\\n\");\n"
+       << "      return S;\n"
+       << "    }\n"
+       << "    case MCD::OPC_TryDecode: {\n"
+       << "      unsigned Len;\n"
+       << "      // Decode the Opcode value.\n"
+       << "      unsigned Opc = decodeULEB128(++Ptr, &Len);\n"
+       << "      Ptr += Len;\n"
+       << "      unsigned DecodeIdx = decodeULEB128(Ptr, &Len);\n"
+       << "      Ptr += Len;\n"
+       << "      // NumToSkip is a plain 24-bit integer.\n"
+       << "      unsigned NumToSkip = *Ptr++;\n"
+       << "      NumToSkip |= (*Ptr++) << 8;\n"
+       << "      NumToSkip |= (*Ptr++) << 16;\n"
+       << "\n"
+       << "      // Perform the decode operation.\n"
+       << "      MCInst TmpMI;\n"
+       << "      TmpMI.setOpcode(Opc);\n"
+       << "      bool DecodeComplete;\n"
+       << "      S = decodeToMCInst(S, DecodeIdx, insn, TmpMI, Address, DisAsm, "
+          "DecodeComplete);\n"
+       << "      LLVM_DEBUG(dbgs() << Loc << \": OPC_TryDecode: opcode \" << "
+          "Opc\n"
+       << "                   << \", using decoder \" << DecodeIdx << \": \");\n"
+       << "\n"
+       << "      if (DecodeComplete) {\n"
+       << "        // Decoding complete.\n"
+       << "        LLVM_DEBUG(dbgs() << (S != MCDisassembler::Fail ? \"PASS\" : "
+          "\"FAIL\") << \"\\n\");\n"
+       << "        MI = TmpMI;\n"
+       << "        return S;\n"
+       << "      } else {\n"
+       << "        assert(S == MCDisassembler::Fail);\n"
+       << "        // If the decoding was incomplete, skip.\n"
+       << "        Ptr += NumToSkip;\n"
+       << "        LLVM_DEBUG(dbgs() << \"FAIL: continuing at \" << (Ptr - "
+          "DecodeTable) << \"\\n\");\n"
+       << "        // Reset decode status. This also drops a SoftFail status "
+          "that could be\n"
+       << "        // set before the decode attempt.\n"
+       << "        S = MCDisassembler::Success;\n"
+       << "      }\n"
+       << "      break;\n"
+       << "    }\n"
+       << "    case MCD::OPC_SoftFail: {\n"
+       << "      // Decode the mask values.\n"
+       << "      unsigned Len;\n"
+       << "      InsnType PositiveMask = decodeULEB128(++Ptr, &Len);\n"
+       << "      Ptr += Len;\n"
+       << "      InsnType NegativeMask = decodeULEB128(Ptr, &Len);\n"
+       << "      Ptr += Len;\n"
+       << "      bool Fail = (insn & PositiveMask) || (~insn & NegativeMask);\n"
+       << "      if (Fail)\n"
+       << "        S = MCDisassembler::SoftFail;\n"
+       << "      LLVM_DEBUG(dbgs() << Loc << \": OPC_SoftFail: \" << (Fail ? "
+          "\"FAIL\\n\" : \"PASS\\n\"));\n"
+       << "      break;\n"
+       << "    }\n"
+       << "    case MCD::OPC_Fail: {\n"
+       << "      LLVM_DEBUG(dbgs() << Loc << \": OPC_Fail\\n\");\n"
+       << "      return MCDisassembler::Fail;\n"
+       << "    }\n"
+       << "    }\n"
+       << "  }\n"
+       << "  llvm_unreachable(\"bogosity detected in disassembler state "
+          "machine!\");\n"
+       << "}\n\n";
+  } else if(TargetLanguage == TargetLangType::C) {
+    std::string InsnTypeName = "uint32_t";
+    OS << "static DecodeStatus decodeInstruction(const uint8_t DecodeTable[], "
+          "MCInst *MI,\n"
+       << "                                      " << InsnTypeName << " insn, uint64_t "
+          "Address,\n"
+       << "                                      const void *DisAsm,\n"
+       << "                                      const MCSubtargetInfo *STI) {\n"
+       << "  const FeatureBitset *Bits = SubTargetInfo_getFeatureBits(STI);\n"
+       << "\n"
+       << "  const uint8_t *Ptr = DecodeTable;\n"
+       << "  " << InsnTypeName << " CurFieldValue = 0;\n"
+       << "  DecodeStatus S = MCDisassembler_Success;\n"
+       << "  while (true) {\n"
+       << "    ptrdiff_t Loc = Ptr - DecodeTable;\n"
+       << "    switch (*Ptr) {\n"
+       << "    default:\n"
+       << "      return MCDisassembler_Fail;\n"
+       << "    case MCD_OPC_ExtractField: {\n"
+       << "      unsigned Start = *++Ptr;\n"
+       << "      unsigned Len = *++Ptr;\n"
+       << "      ++Ptr;\n"
+       << "      CurFieldValue = fieldFromInstruction(insn, Start, Len);\n"
+       << "      break;\n"
+       << "    }\n"
+       << "    case MCD_OPC_FilterValue: {\n"
+       << "      // Decode the field value.\n"
+       << "      unsigned Len;\n"
+       << "      " << InsnTypeName << " Val = decodeULEB128(++Ptr, &Len);\n"
+       << "      Ptr += Len;\n"
+       << "      // NumToSkip is a plain 24-bit integer.\n"
+       << "      unsigned NumToSkip = *Ptr++;\n"
+       << "      NumToSkip |= (*Ptr++) << 8;\n"
+       << "      NumToSkip |= (*Ptr++) << 16;\n"
+       << "\n"
+       << "      // Perform the filter operation.\n"
+       << "      if (Val != CurFieldValue)\n"
+       << "        Ptr += NumToSkip;\n"
+       << "\n"
+       << "      break;\n"
+       << "    }\n"
+       << "    case MCD_OPC_CheckField: {\n"
+       << "      unsigned Start = *++Ptr;\n"
+       << "      unsigned Len = *++Ptr;\n"
+       << "      " << InsnTypeName << " FieldValue = fieldFromInstruction(insn, Start, Len);\n"
+       << "      // Decode the field value.\n"
+       << "      " << InsnTypeName << " ExpectedValue = decodeULEB128(++Ptr, &Len);\n"
+       << "      Ptr += Len;\n"
+       << "      // NumToSkip is a plain 24-bit integer.\n"
+       << "      unsigned NumToSkip = *Ptr++;\n"
+       << "      NumToSkip |= (*Ptr++) << 8;\n"
+       << "      NumToSkip |= (*Ptr++) << 16;\n"
+       << "\n"
+       << "      // If the actual and expected values don't match, skip.\n"
+       << "      if (ExpectedValue != FieldValue)\n"
+       << "        Ptr += NumToSkip;\n"
+       << "      break;\n"
+       << "    }\n"
+       << "    case MCD_OPC_CheckPredicate: {\n"
+       << "      unsigned Len;\n"
+       << "      // Decode the Predicate Index value.\n"
+       << "      unsigned PIdx = decodeULEB128(++Ptr, &Len);\n"
+       << "      Ptr += Len;\n"
+       << "      // NumToSkip is a plain 24-bit integer.\n"
+       << "      unsigned NumToSkip = *Ptr++;\n"
+       << "      NumToSkip |= (*Ptr++) << 8;\n"
+       << "      NumToSkip |= (*Ptr++) << 16;\n"
+       << "      // Check the predicate.\n"
+       << "      bool Pred;\n"
+       << "      if (!(Pred = checkDecoderPredicate(PIdx, Bits)))\n"
+       << "        Ptr += NumToSkip;\n"
+       << "      (void)Pred;\n"
+       << "\n"
+       << "      break;\n"
+       << "    }\n"
+       << "    case MCD_OPC_Decode: {\n"
+       << "      unsigned Len;\n"
+       << "      // Decode the Opcode value.\n"
+       << "      unsigned Opc = decodeULEB128(++Ptr, &Len);\n"
+       << "      Ptr += Len;\n"
+       << "      unsigned DecodeIdx = decodeULEB128(Ptr, &Len);\n"
+       << "      Ptr += Len;\n"
+       << "\n"
+       << "      MCInst_clear(MI);\n"
+       << "      MCInst_setOpcode(MI, Opc);\n"
+       << "      bool DecodeComplete;\n"
+       << "      S = decodeToMCInst(S, DecodeIdx, insn, MI, Address, DisAsm, "
+          "&DecodeComplete);\n"
+       << "      assert(DecodeComplete);\n"
+       << "\n"
+       << "      return S;\n"
+       << "    }\n"
+       << "    case MCD_OPC_TryDecode: {\n"
+       << "      unsigned Len;\n"
+       << "      // Decode the Opcode value.\n"
+       << "      unsigned Opc = decodeULEB128(++Ptr, &Len);\n"
+       << "      Ptr += Len;\n"
+       << "      unsigned DecodeIdx = decodeULEB128(Ptr, &Len);\n"
+       << "      Ptr += Len;\n"
+       << "      // NumToSkip is a plain 24-bit integer.\n"
+       << "      unsigned NumToSkip = *Ptr++;\n"
+       << "      NumToSkip |= (*Ptr++) << 8;\n"
+       << "      NumToSkip |= (*Ptr++) << 16;\n"
+       << "\n"
+       << "      // Perform the decode operation.\n"
+       << "      MCInst *TmpMI;\n"
+       << "      MCInst_setOpcode(TmpMI, Opc);\n"
+       << "      bool DecodeComplete;\n"
+       << "      S = decodeToMCInst(S, DecodeIdx, insn, TmpMI, Address, DisAsm, "
+          "&DecodeComplete);\n"
+       << "\n"
+       << "      if (DecodeComplete) {\n"
+       << "        // Decoding complete.\n"
+       << "        MI = TmpMI;\n"
+       << "        return S;\n"
+       << "      } else {\n"
+       << "        assert(S == MCDisassembler_Fail);\n"
+       << "        // If the decoding was incomplete, skip.\n"
+       << "        Ptr += NumToSkip;\n"
+       << "        // Reset decode status. This also drops a SoftFail status "
+          "that could be\n"
+       << "        // set before the decode attempt.\n"
+       << "        S = MCDisassembler_Success;\n"
+       << "      }\n"
+       << "      break;\n"
+       << "    }\n"
+       << "    case MCD_OPC_SoftFail: {\n"
+       << "      // Decode the mask values.\n"
+       << "      unsigned Len;\n"
+       << "      " << InsnTypeName << " PositiveMask = decodeULEB128(++Ptr, &Len);\n"
+       << "      Ptr += Len;\n"
+       << "      " << InsnTypeName << " NegativeMask = decodeULEB128(Ptr, &Len);\n"
+       << "      Ptr += Len;\n"
+       << "      bool Fail = (insn & PositiveMask) || (~insn & NegativeMask);\n"
+       << "      if (Fail)\n"
+       << "        S = MCDisassembler_SoftFail;\n"
+       << "      break;\n"
+       << "    }\n"
+       << "    case MCD_OPC_Fail: {\n"
+       << "      return MCDisassembler_Fail;\n"
+       << "    }\n"
+       << "    }\n"
+       << "  }\n"
+       << "  llvm_unreachable(\"bogosity detected in disassembler state "
+          "machine!\");\n"
+       << "}\n\n";
+  }
 }
 
 // Emits disassembler code for instruction decoding.
 void FixedLenDecoderEmitter::run(raw_ostream &o) {
   formatted_raw_ostream OS(o);
-  OS << "#include \"llvm/MC/MCInst.h\"\n";
-  OS << "#include \"llvm/Support/DataTypes.h\"\n";
-  OS << "#include \"llvm/Support/Debug.h\"\n";
-  OS << "#include \"llvm/Support/LEB128.h\"\n";
-  OS << "#include \"llvm/Support/raw_ostream.h\"\n";
-  OS << "#include <assert.h>\n";
+  if (Target.getTargetLanguage() == TargetLangType::CPP) {
+    OS << "#include \"llvm/MC/MCInst.h\"\n";
+    OS << "#include \"llvm/Support/DataTypes.h\"\n";
+    OS << "#include \"llvm/Support/Debug.h\"\n";
+    OS << "#include \"llvm/Support/LEB128.h\"\n";
+    OS << "#include \"llvm/Support/raw_ostream.h\"\n";
+    OS << "#include <assert.h>\n";
+  } else {
+    OS << "// No headers are provided by llvm for this language;\n";
+    OS << "// You must provide appropriate types for code to compile.\n";
+  }
   OS << '\n';
-  OS << "namespace llvm {\n\n";
 
-  emitFieldFromInstruction(OS);
+  if (Target.getTargetLanguage() == TargetLangType::CPP) {
+    // C++ supports namespaces, so let's namespace everything
+    OS << "namespace llvm {\n\n";
+  }
+
+  emitFieldFromInstruction(OS, Target.getTargetLanguage());
 
   Target.reverseBitsForLittleEndianEncoding();
 
@@ -2530,9 +2805,11 @@ void FixedLenDecoderEmitter::run(raw_ostream &o) {
   emitDecoderFunction(OS, TableInfo.Decoders, 0);
 
   // Emit the main entry point for the decoder, decodeInstruction().
-  emitDecodeInstruction(OS);
+  emitDecodeInstruction(OS, Target.getTargetLanguage());
 
-  OS << "\n} // end namespace llvm\n";
+  if (Target.getTargetLanguage() == TargetLangType::CPP) {
+    OS << "\n} // end namespace llvm\n";
+  }
 }
 
 namespace llvm {

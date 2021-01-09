@@ -40,6 +40,18 @@ static cl::opt<unsigned>
                  cl::desc("Make -gen-asm-writer emit assembly writer #N"),
                  cl::cat(AsmWriterCat));
 
+static cl::opt<TargetLangType> TargetLanguage(
+    "target-language",
+    cl::desc("When emitting the table-gen output files, generate them in the "
+             "specified language. This allows for generation of c versions of "
+             "the inc files for portability"),
+    cl::values(
+      clEnumValN(CPP, "cpp", "Generate C++ code (default)"),
+      clEnumValN(C, "c", "Generate C code")
+      )
+    );
+
+
 /// getValueType - Return the MVT::SimpleValueType that the specified TableGen
 /// record corresponds to.
 MVT::SimpleValueType llvm::getValueType(Record *Rec) {
@@ -327,6 +339,10 @@ Record *CodeGenTarget::getAsmWriter() const {
     PrintFatalError("Target does not have an AsmWriter #" +
                     Twine(AsmWriterNum) + "!");
   return LI[AsmWriterNum];
+}
+
+TargetLangType CodeGenTarget::getTargetLanguage() const {
+  return TargetLanguage;
 }
 
 CodeGenRegBank &CodeGenTarget::getRegBank() const {

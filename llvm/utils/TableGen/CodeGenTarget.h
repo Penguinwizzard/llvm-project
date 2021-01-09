@@ -31,6 +31,11 @@ struct CodeGenRegister;
 class CodeGenSchedModels;
 class CodeGenTarget;
 
+enum TargetLangType {
+  CPP,
+  C,
+};
+
 /// getValueType - Return the MVT::SimpleValueType that the specified TableGen
 /// record corresponds to.
 MVT::SimpleValueType getValueType(Record *Rec);
@@ -102,6 +107,9 @@ public:
   /// getAsmWriter - Return the AssemblyWriter definition for this target.
   ///
   Record *getAsmWriter() const;
+
+  /// getTargetLanguage - Get which language we're supposed to be emitting.
+  TargetLangType getTargetLanguage() const;
 
   /// getRegBank - Return the register bank description.
   CodeGenRegBank &getRegBank() const;
