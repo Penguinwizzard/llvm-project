@@ -21,6 +21,7 @@
 #include "llvm/Support/VirtualFileSystem.h"
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 
 namespace lld::coff {
@@ -145,6 +146,7 @@ struct Configuration {
   bool printSearchPaths = false;
   unsigned debugTypes = static_cast<unsigned>(DebugType::None);
   llvm::SmallVector<llvm::StringRef, 0> mllvmOpts;
+  std::optional<int> pdbMSFZCompressionLevel;
   std::vector<std::string> natvisFiles;
   llvm::StringMap<std::string> namedStreams;
   llvm::SmallString<128> pdbAltPath;

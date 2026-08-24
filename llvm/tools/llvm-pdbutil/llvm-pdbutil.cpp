@@ -1512,7 +1512,7 @@ static void exportStream() {
   std::unique_ptr<IPDBSession> Session;
   PDBFile &File = loadPDB(opts::exportstream::InputFilename.front(), Session);
 
-  std::unique_ptr<MappedBlockStream> SourceStream;
+  std::unique_ptr<BinaryStream> SourceStream;
   uint32_t Index = 0;
   bool Success = false;
   std::string OutFileName = opts::exportstream::OutputFile;
@@ -1559,7 +1559,7 @@ static void exportStream() {
     }
   }
 
-  SourceStream = File.createIndexedStream(Index);
+  SourceStream = ExitOnErr(File.safelyCreateStream(Index));
   auto OutFile = ExitOnErr(
       FileOutputBuffer::create(OutFileName, SourceStream->getLength()));
   FileBufferByteStream DestStream(std::move(OutFile), llvm::endianness::little);
